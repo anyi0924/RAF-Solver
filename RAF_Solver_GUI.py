@@ -1,3 +1,5 @@
+# Updated solver (2026-08-13) to replace the old solving method, which could miss modes when 
+# a root coincided with a pole; the old version is kept commented out in its original position.
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -545,14 +547,67 @@ class FiberModeSolverGUI:
         self.update_refractive_index_plot()
         messagebox.showinfo("Parameters Reset",
                           "All parameters have been reset to default values.")
-    def find_neff_interval(self, neff, space_i, parameters, start_time, timeout=30):
+#     def find_neff_interval(self, neff, space_i, parameters, start_time, timeout=30):
+#         k0, m, n1, n2, n3, nclad, a1, yita2, yita3 = parameters
+#         space = space_i / 100.0
+#         initial_n = neff
+#         continue_search = True
+#         neff_r = None
+#         neff_l = None
+#         while continue_search:
+#             serial_n = np.linspace(initial_n - space * 99, initial_n, 100)
+#             u1 = a1 * k0 * np.sqrt(np.abs(n1**2 - serial_n**2))
+#             w2 = a1 * k0 * np.sqrt(np.abs(serial_n**2 - n2**2))
+#             u3 = a1 * k0 * np.sqrt(np.abs(n3**2 - serial_n**2))
+#             w4 = a1 * k0 * np.sqrt(np.abs(serial_n**2 - nclad**2))
+#             with np.errstate(invalid='ignore', divide='ignore'):
+#                 P3 = jv(m, yita2 * u3) * yv(m+1, yita3 * u3) - yv(m, yita2 * u3) * jv(m+1, yita3 * u3)
+#                 Q3 = jv(m+1, yita2 * u3) * yv(m+1, yita3 * u3) - yv(m+1, yita2 * u3) * jv(m+1, yita3 * u3)
+#                 R3 = jv(m, yita2 * u3) * yv(m, yita3 * u3) - yv(m, yita2 * u3) * jv(m, yita3 * u3)
+#                 S3 = jv(m+1, yita2 * u3) * yv(m, yita3 * u3) - yv(m+1, yita2 * u3) * jv(m, yita3 * u3)
+#                 P2b = w2 * kv(m+1, yita2 * w2) * P3 - u3 * kv(m, yita2 * w2) * Q3
+#                 Q2b = w2 * iv(m+1, yita2 * w2) * P3 + u3 * iv(m, yita2 * w2) * Q3
+#                 R2b = w2 * kv(m+1, yita2 * w2) * R3 - u3 * kv(m, yita2 * w2) * S3
+#                 S2b = w2 * iv(m+1, yita2 * w2) * R3 + u3 * iv(m, yita2 * w2) * S3
+#                 P2 = -iv(m, w2) * P2b - kv(m, w2) * Q2b
+#                 Q2 = iv(m+1, w2) * P2b - kv(m+1, w2) * Q2b
+#                 R2 = -iv(m, w2) * R2b - kv(m, w2) * S2b
+#                 S2 = iv(m+1, w2) * R2b - kv(m+1, w2) * S2b
+#                 denom_k = kv(m, yita3 * w4)
+#                 denom_r = u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2
+#                 equation_left = np.where(denom_k != 0,
+#                                         w4 * kv(m+1, yita3 * w4) / denom_k,
+#                                         np.inf)
+#                 equation_right = np.where(denom_r != 0,
+#                                          u3 * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2) / denom_r,
+#                                          np.inf)
+#             f_temp = equation_left - equation_right
+#             for i in range(98, -1, -1):
+#                 if (not np.isnan(f_temp[i+1]) and not np.isnan(f_temp[i]) and
+#                     not np.isinf(f_temp[i+1]) and not np.isinf(f_temp[i])):
+#                     if f_temp[i+1] * f_temp[i] < 0 and abs(f_temp[i+1] * f_temp[i]) < 1.0:
+#                         neff_r = serial_n[i+1]
+#                         neff_l = serial_n[i]
+#                         continue_search = False
+#                         break
+#             if continue_search:
+#                 initial_n = initial_n - 98 * space
+#             if time.time() - start_time > timeout:
+#                 if neff_r is None or neff_l is None:
+#                     neff_r = serial_n[-1]
+#                     neff_l = serial_n[-2]
+#                 continue_search = False
+#         space = space_i / 10.0
+#         return neff_l, neff_r, space
+    def find_neff_initial_interval(self, neff, space_i, parameters, start_time, timeout=30):
         k0, m, n1, n2, n3, nclad, a1, yita2, yita3 = parameters
         space = space_i / 100.0
         initial_n = neff
         continue_search = True
         neff_r = None
         neff_l = None
-        while continue_search:
+        interval_found = False
+        while continue_search and not interval_found:
             serial_n = np.linspace(initial_n - space * 99, initial_n, 100)
             u1 = a1 * k0 * np.sqrt(np.abs(n1**2 - serial_n**2))
             w2 = a1 * k0 * np.sqrt(np.abs(serial_n**2 - n2**2))
@@ -571,32 +626,55 @@ class FiberModeSolverGUI:
                 Q2 = iv(m+1, w2) * P2b - kv(m+1, w2) * Q2b
                 R2 = -iv(m, w2) * R2b - kv(m, w2) * S2b
                 S2 = iv(m+1, w2) * R2b - kv(m+1, w2) * S2b
-                denom_k = kv(m, yita3 * w4)
-                denom_r = u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2
-                equation_left = np.where(denom_k != 0,
-                                        w4 * kv(m+1, yita3 * w4) / denom_k,
-                                        np.inf)
-                equation_right = np.where(denom_r != 0,
-                                         u3 * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2) / denom_r,
-                                         np.inf)
-            f_temp = equation_left - equation_right
+                f_temp = (w4 * kv(m+1, yita3 * w4) * (u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2)
+                          - u3 * kv(m, yita3 * w4) * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2))
             for i in range(98, -1, -1):
                 if (not np.isnan(f_temp[i+1]) and not np.isnan(f_temp[i]) and
                     not np.isinf(f_temp[i+1]) and not np.isinf(f_temp[i])):
-                    if f_temp[i+1] * f_temp[i] < 0 and abs(f_temp[i+1] * f_temp[i]) < 1.0:
+                    if f_temp[i+1] * f_temp[i] < 0:
                         neff_r = serial_n[i+1]
                         neff_l = serial_n[i]
+                        interval_found = True
                         continue_search = False
                         break
-            if continue_search:
+            if not interval_found:
                 initial_n = initial_n - 98 * space
             if time.time() - start_time > timeout:
                 if neff_r is None or neff_l is None:
                     neff_r = serial_n[-1]
                     neff_l = serial_n[-2]
+                interval_found = True
                 continue_search = False
         space = space_i / 10.0
         return neff_l, neff_r, space
+#     def compute_characteristic_equation(self, neff, parameters):
+#         k0, m, n1, n2, n3, nclad, a1, yita2, yita3 = parameters
+#         u1 = a1 * k0 * np.sqrt(n1**2 - neff**2)
+#         w2 = a1 * k0 * np.sqrt(neff**2 - n2**2)
+#         u3 = a1 * k0 * np.sqrt(n3**2 - neff**2)
+#         w4 = a1 * k0 * np.sqrt(neff**2 - nclad**2)
+#         with np.errstate(invalid='ignore', divide='ignore'):
+#             P3 = jv(m, yita2 * u3) * yv(m+1, yita3 * u3) - yv(m, yita2 * u3) * jv(m+1, yita3 * u3)
+#             Q3 = jv(m+1, yita2 * u3) * yv(m+1, yita3 * u3) - yv(m+1, yita2 * u3) * jv(m+1, yita3 * u3)
+#             R3 = jv(m, yita2 * u3) * yv(m, yita3 * u3) - yv(m, yita2 * u3) * jv(m, yita3 * u3)
+#             S3 = jv(m+1, yita2 * u3) * yv(m, yita3 * u3) - yv(m+1, yita2 * u3) * jv(m, yita3 * u3)
+#             P2b = w2 * kv(m+1, yita2 * w2) * P3 - u3 * kv(m, yita2 * w2) * Q3
+#             Q2b = w2 * iv(m+1, yita2 * w2) * P3 + u3 * iv(m, yita2 * w2) * Q3
+#             R2b = w2 * kv(m+1, yita2 * w2) * R3 - u3 * kv(m, yita2 * w2) * S3
+#             S2b = w2 * iv(m+1, yita2 * w2) * R3 + u3 * iv(m, yita2 * w2) * S3
+#             P2 = -iv(m, w2) * P2b - kv(m, w2) * Q2b
+#             Q2 = iv(m+1, w2) * P2b - kv(m+1, w2) * Q2b
+#             R2 = -iv(m, w2) * R2b - kv(m, w2) * S2b
+#             S2 = iv(m+1, w2) * R2b - kv(m+1, w2) * S2b
+#             denom_k = kv(m, yita3 * w4)
+#             denom_r = u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2
+#             if denom_k != 0 and denom_r != 0:
+#                 equation_left = w4 * kv(m+1, yita3 * w4) / denom_k
+#                 equation_right = u3 * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2) / denom_r
+#                 fval = abs(equation_left - equation_right)
+#             else:
+#                 fval = 1e-5
+#         return fval
     def compute_characteristic_equation(self, neff, parameters):
         k0, m, n1, n2, n3, nclad, a1, yita2, yita3 = parameters
         u1 = a1 * k0 * np.sqrt(n1**2 - neff**2)
@@ -616,15 +694,62 @@ class FiberModeSolverGUI:
             Q2 = iv(m+1, w2) * P2b - kv(m+1, w2) * Q2b
             R2 = -iv(m, w2) * R2b - kv(m, w2) * S2b
             S2 = iv(m+1, w2) * R2b - kv(m+1, w2) * S2b
-            denom_k = kv(m, yita3 * w4)
-            denom_r = u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2
-            if denom_k != 0 and denom_r != 0:
-                equation_left = w4 * kv(m+1, yita3 * w4) / denom_k
-                equation_right = u3 * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2) / denom_r
-                fval = abs(equation_left - equation_right)
-            else:
-                fval = 1e-5
+            t1 = w4 * kv(m+1, yita3 * w4) * (u1 * jv(m+1, u1) * R2 - w2 * jv(m, u1) * S2)
+            t2 = u3 * kv(m, yita3 * w4) * (u1 * jv(m+1, u1) * P2 - w2 * jv(m, u1) * Q2)
+            fval = abs(t1 - t2) / max(abs(t1) + abs(t2), 1e-300)
         return fval
+    def _bisect_ce(self, neff_l, neff_r, parameters):
+        k0, m, n1, n2, n3, nclad, a1, yita2, yita3 = parameters
+        def f_signed(ne):
+            u1 = a1 * k0 * np.sqrt(np.abs(n1 ** 2 - ne ** 2))
+            w2 = a1 * k0 * np.sqrt(np.abs(ne ** 2 - n2 ** 2))
+            u3 = a1 * k0 * np.sqrt(np.abs(n3 ** 2 - ne ** 2))
+            w4 = a1 * k0 * np.sqrt(np.abs(ne ** 2 - nclad ** 2))
+            P3 = jv(m, yita2 * u3) * yv(m + 1, yita3 * u3) - yv(m, yita2 * u3) * jv(m + 1, yita3 * u3)
+            Q3 = jv(m + 1, yita2 * u3) * yv(m + 1, yita3 * u3) - yv(m + 1, yita2 * u3) * jv(m + 1, yita3 * u3)
+            R3 = jv(m, yita2 * u3) * yv(m, yita3 * u3) - yv(m, yita2 * u3) * jv(m, yita3 * u3)
+            S3 = jv(m + 1, yita2 * u3) * yv(m, yita3 * u3) - yv(m + 1, yita2 * u3) * jv(m, yita3 * u3)
+            P2b = w2 * kv(m + 1, yita2 * w2) * P3 - u3 * kv(m, yita2 * w2) * Q3
+            Q2b = w2 * iv(m + 1, yita2 * w2) * P3 + u3 * iv(m, yita2 * w2) * Q3
+            R2b = w2 * kv(m + 1, yita2 * w2) * R3 - u3 * kv(m, yita2 * w2) * S3
+            S2b = w2 * iv(m + 1, yita2 * w2) * R3 + u3 * iv(m, yita2 * w2) * S3
+            P2 = -iv(m, w2) * P2b - kv(m, w2) * Q2b
+            Q2 = iv(m + 1, w2) * P2b - kv(m + 1, w2) * Q2b
+            R2 = -iv(m, w2) * R2b - kv(m, w2) * S2b
+            S2 = iv(m + 1, w2) * R2b - kv(m + 1, w2) * S2b
+            return (w4 * kv(m + 1, yita3 * w4) * (u1 * jv(m + 1, u1) * R2 - w2 * jv(m, u1) * S2)
+                    - u3 * kv(m, yita3 * w4) * (u1 * jv(m + 1, u1) * P2 - w2 * jv(m, u1) * Q2))
+        with np.errstate(invalid='ignore', divide='ignore', over='ignore'):
+            fl, fr = f_signed(neff_l), f_signed(neff_r)
+        if not (np.isfinite(fl) and np.isfinite(fr) and fl * fr < 0):
+            return neff_r, False
+        for _ in range(80):
+            nm = (neff_l + neff_r) / 2.0
+            with np.errstate(invalid='ignore', divide='ignore', over='ignore'):
+                fm = f_signed(nm)
+            if np.isfinite(fm) and fl * fm <= 0:
+                neff_r, fr = nm, fm
+            else:
+                neff_l, fl = nm, fm
+        return (neff_l + neff_r) / 2.0, True
+#     def solve_neff_for_mode(self, m, initial_neff, base_parameters, mode_name="Unknown"):
+#         k0, n1, n2, n3, nclad, a1, yita2, yita3 = base_parameters
+#         parameters = [k0, m, n1, n2, n3, nclad, a1, yita2, yita3]
+#         start_time = time.time()
+#         space = 1e-6
+#         fval = 1.0
+#         neff = initial_neff
+#         iterations = 0
+#         max_iterations = 200
+#         while fval > 1e-7 and iterations < max_iterations:
+#             iterations += 1
+#             neff_l, neff_r, space = self.find_neff_interval(
+#                 neff, space, parameters, start_time
+#             )
+#             if neff_r is not None:
+#                 neff = neff_r
+#             fval = self.compute_characteristic_equation(neff, parameters)
+#         return neff, fval, iterations
     def solve_neff_for_mode(self, m, initial_neff, base_parameters, mode_name="Unknown"):
         k0, n1, n2, n3, nclad, a1, yita2, yita3 = base_parameters
         parameters = [k0, m, n1, n2, n3, nclad, a1, yita2, yita3]
@@ -634,12 +759,17 @@ class FiberModeSolverGUI:
         neff = initial_neff
         iterations = 0
         max_iterations = 200
-        while fval > 1e-7 and iterations < max_iterations:
+        refined = False
+        while fval > 1e-7 and iterations < max_iterations and not refined:
             iterations += 1
-            neff_l, neff_r, space = self.find_neff_interval(
+            neff_l, neff_r, space = self.find_neff_initial_interval(
                 neff, space, parameters, start_time
             )
-            if neff_r is not None:
+            if neff_l is not None and neff_r is not None:
+                neff, ok = self._bisect_ce(neff_l, neff_r, parameters)
+                if ok:
+                    refined = True
+            elif neff_r is not None:
                 neff = neff_r
             fval = self.compute_characteristic_equation(neff, parameters)
         return neff, fval, iterations
